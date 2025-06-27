@@ -1,5 +1,6 @@
-from setuptools import setup, find_packages
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 # Read the long description from README.md
 long_description = Path("README.md").read_text(encoding="utf-8")
@@ -12,7 +13,7 @@ setup(
     description="A Django middleware for observability with OpenTelemetry, Prometheus, and structured logging",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/mahdighadiriii/django-observability",  # Replace with actual URL
+    url="https://github.com/mahdighadiriii/django-observability",
     project_urls={
         "Source": "https://github.com/mahdighadiriii/django-observability",
         "Bug Tracker": "https://github.com/mahdighadiriii/django-observability/issues",

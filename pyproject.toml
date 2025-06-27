@@ -47,7 +47,7 @@ classifiers = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
-    "pytest-django>=4.5.2",
+    "pytest-django>=4.8.0",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.21.1",
     "flake8>=6.0.0",
@@ -56,6 +56,7 @@ dev = [
     "mypy>=1.5.1",
     "requests-mock>=1.11.0",
     "pre-commit>=3.3.3",
+    "ruff>=0.4.3",
 ]
 
 [tool.black]
@@ -69,4 +70,24 @@ multi_line_output = 3
 
 [tool.mypy]
 strict = true
+exclude = "(^build/|^dist/)"
 ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+fix = true
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+  "C90",
+  "T20",
+  "N",
+]
+ignore = ["E501"]
