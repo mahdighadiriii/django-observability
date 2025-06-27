@@ -14,14 +14,20 @@ license = { file = "LICENSE" }
 requires-python = ">=3.8"
 
 dependencies = [
-    "django>=3.2",
+    "django>=3.2,<6.0",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-instrumentation-django>=0.35b0",
+    "opentelemetry-instrumentation-psycopg2>=0.35b0",
+    "opentelemetry-instrumentation-redis>=0.35b0",
+    "opentelemetry-instrumentation-requests>=0.35b0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
-    "prometheus-client>=0.17.0",
-    "structlog>=23.1.0",
+    "opentelemetry-exporter-jaeger-thrift>=1.20.0",
+    "opentelemetry-exporter-zipkin>=1.20.0",
+    "prometheus-client>=0.17.0,<1.0.0",
+    "structlog>=23.1.0,<26.0.0",
 ]
+
 
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -57,6 +63,7 @@ dev = [
     "requests-mock>=1.11.0",
     "pre-commit>=3.3.3",
     "ruff>=0.4.3",
+    "opentelemetry-exporter-jaeger-thrift>=1.20.0",
 ]
 
 [tool.black]
