@@ -3,10 +3,8 @@ from django.test import RequestFactory
 from django.conf import settings
 from django_observability.config import ObservabilityConfig, reload_config
 
-
-@pytest.fixture(autouse=True)
-def setup_django_settings(tmp_path):
-    """Configure Django settings for tests."""
+def pytest_configure():
+    """Configure Django settings before any tests run."""
     settings.configure(
         DEBUG=True,
         ROOT_URLCONF='tests.urls',
@@ -19,16 +17,14 @@ def setup_django_settings(tmp_path):
             'EXCLUDE_PATHS': ['/health/', '/metrics/'],
         }
     )
-    reload_config()
-
+    reload_config()  # Reload ObservabilityConfig after settings are configured
 
 @pytest.fixture
 def request_factory():
     """Provide a RequestFactory instance."""
     return RequestFactory()
 
-
 @pytest.fixture
 def config():
     """Provide a fresh ObservabilityConfig instance."""
-    return ObservabilityConfig()
+    return reload_config()

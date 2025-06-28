@@ -8,10 +8,9 @@ import json
 import logging
 import time
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from django.http import HttpRequest, HttpResponse
-from django.utils import timezone
 
 from .config import ObservabilityConfig
 from .utils import get_client_ip, sanitize_headers, get_view_name
@@ -39,7 +38,6 @@ class JSONFormatter(logging.Formatter):
         Returns:
             JSON formatted log string
         """
-
         log_entry = {
             "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,

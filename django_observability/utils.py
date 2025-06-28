@@ -1,7 +1,10 @@
 import re
 from typing import Dict, List, Optional
 from django.http import HttpRequest
+from django.urls import resolve
+import logging
 
+logger = logging.getLogger('django_observability.utils')
 
 def get_client_ip(request: HttpRequest) -> str:
     """
@@ -60,8 +63,17 @@ def get_view_name(request: HttpRequest) -> str:
         request: The Django HttpRequest object
 
     Returns:
-        The view name or 'unknown' if not available
+        The view name or 'unknown' if not resolved
     """
-    if hasattr(request, 'resolver_match') and request.resolver_match:
-        return request.resolver_match.view_name or 'unknown'
-    return 'unknown'
+    try:
+        # Ensure resolver_match is populated
+        if not hasattr(request, 'resolver_match') or not request.resolver_match:
+            resolver_match = resolve(request.path)
+            request.resolver_match = resolver_match
+            logger.debug(f"Manually resolved path {request.path}: {resolver_match.__dict__}")
+        view_name = request.resolver_match.view_name or 'unknown'
+        logger.debug(f"Resolved view_name for {request.path}: {view_name}")
+        return view_name
+    except Exception as e:
+        logger.debug(f"Failed to resolve view name for {request.path}: {str(e)}")
+        return 'unknown'

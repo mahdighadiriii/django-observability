@@ -8,6 +8,10 @@ import time
 import logging
 from typing import Dict, List, Optional, Any
 import re
+from django.conf import settings
+from django import get_version as django_get_version
+from prometheus_client import Counter, Gauge, Histogram, Info
+
 
 try:
     from prometheus_client import (
@@ -28,7 +32,18 @@ from .config import ObservabilityConfig
 from .utils import get_client_ip, get_view_name
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('django_observability.metrics')
+
+# Singleton MetricsCollector instance
+_metrics_collector_instance = None
+
+
+def get_metrics_collector(config: ObservabilityConfig) -> 'MetricsCollector':
+    """Return a singleton MetricsCollector instance."""
+    global _metrics_collector_instance
+    if _metrics_collector_instance is None:
+        _metrics_collector_instance = MetricsCollector(config)
+    return _metrics_collector_instance
 
 
 class MetricsCollector:
@@ -62,6 +77,7 @@ class MetricsCollector:
         self._setup_metrics()
         self._setup_instrumentations()
         self._initialized = True
+        logger.debug("MetricsCollector initialized")
     
     def _setup_metrics(self) -> None:
         """Setup all Prometheus metrics."""
@@ -234,6 +250,33 @@ class MetricsCollector:
         """Check if metrics collection is available."""
         return PROMETHEUS_AVAILABLE and self._initialized
     
+    def start_request(self, request: HttpRequest) -> None:
+        """
+        Start tracking a request for metrics.
+        
+        Args:
+            request: The Django HttpRequest object
+        """
+        if not self.is_available():
+            return
+        logger.debug(f"MetricsCollector: Starting request {request.method} {request.path}")
+        self.increment_request_counter(request)
+    
+    def end_request(self, request: HttpRequest, response: HttpResponse, duration: float) -> None:
+        """
+        End tracking a request and record metrics.
+        
+        Args:
+            request: The Django HttpRequest object
+            response: The Django HttpResponse object
+            duration: The request duration in seconds
+        """
+        if not self.is_available():
+            return
+        logger.debug(f"MetricsCollector: Ending request {request.method} {request.path}, status={response.status_code}, duration={duration}")
+        self.record_request_duration(request, response, duration)
+        self.increment_response_counter(request, response)
+    
     def increment_request_counter(self, request: HttpRequest) -> None:
         """
         Increment the active requests counter.
@@ -246,6 +289,7 @@ class MetricsCollector:
         
         try:
             self.django_active_requests.inc()
+            logger.debug(f"Incremented active requests for {request.method} {request.path}")
         except Exception as e:
             logger.error("Failed to increment request counter", exc_info=True)
     
@@ -272,6 +316,8 @@ class MetricsCollector:
             endpoint = self._get_endpoint_label(request)
             status = str(response.status_code)
             view_name = get_view_name(request)
+            
+            logger.debug(f"Recording duration: method={method}, endpoint={endpoint}, status={status}, view_name={view_name}, duration={duration}")
             
             # Record duration
             self.http_request_duration_seconds.labels(
@@ -319,6 +365,8 @@ class MetricsCollector:
             status = str(response.status_code)
             view_name = get_view_name(request)
             
+            logger.debug(f"Incrementing response counter: method={method}, endpoint={endpoint}, status={status}, view_name={view_name}")
+            
             # Increment response counter
             self.http_requests_total.labels(
                 method=method,
@@ -329,6 +377,7 @@ class MetricsCollector:
             
             # Decrement active requests
             self.django_active_requests.dec()
+            logger.debug(f"Decremented active requests for {request.method} {request.path}")
         
         except Exception as e:
             logger.error("Failed to increment response counter", exc_info=True)
@@ -349,6 +398,8 @@ class MetricsCollector:
             method = request.method if request else 'UNKNOWN'
             endpoint = self._get_endpoint_label(request) if request else 'unknown'
             exception_type = exception.__class__.__name__
+            
+            logger.debug(f"Incrementing exception counter: method={method}, endpoint={endpoint}, exception_type={exception_type}")
             
             # Increment exception counter
             self.http_exceptions_total.labels(
@@ -377,6 +428,7 @@ class MetricsCollector:
             return
         
         try:
+            logger.debug(f"Recording DB query: db_alias={db_alias}, query_type={query_type}, duration={duration}")
             # Increment query counter
             self.django_db_queries_total.labels(
                 db_alias=db_alias,
@@ -405,6 +457,7 @@ class MetricsCollector:
             return
         
         try:
+            logger.debug(f"Recording cache operation: cache_name={cache_name}, operation={operation}, result={result}")
             self.django_cache_operations_total.labels(
                 cache_name=cache_name,
                 operation=operation,
@@ -433,12 +486,10 @@ class MetricsCollector:
                 return url_name
         
         path = request.path
-        
-
         path = re.sub(r'/\d+/', '/{id}/', path)
         path = re.sub(r'/[0-9a-f-]{36}/', '/{uuid}/', path)
         
-        return path
+        return path.lstrip('/')
     
     def _get_request_size(self, request: HttpRequest) -> int:
         """Get request content size in bytes."""
@@ -596,9 +647,24 @@ def metrics_view(request: HttpRequest) -> HttpResponse:
     """
     from .config import get_config
     config = get_config()
-    collector = MetricsCollector(config)
+    collector = get_metrics_collector(config)  # Use singleton
     metrics_data = collector.get_metrics()
     return HttpResponse(
         content=metrics_data,
         content_type=collector.get_metrics_content_type()
     )
+
+django_info = Info(
+    'django_app_django_info',
+    'Django application information',
+    ['debug', 'django_version', 'environment', 'version']
+)
+
+
+def initialize_metrics():
+    django_info.labels(
+        debug=str(settings.DEBUG),
+        django_version=django_get_version(),
+        environment=getattr(settings, 'ENVIRONMENT', 'development'),
+        version=getattr(settings, 'VERSION', '1.0.0')
+    ).set(1)

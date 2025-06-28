@@ -15,6 +15,7 @@ requires-python = ">=3.8"
 
 dependencies = [
     "django>=3.2,<6.0",
+    "setuptools<81",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-instrumentation-django>=0.35b0",

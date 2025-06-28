@@ -14,13 +14,13 @@ import logging
 
 from .config import get_config
 from .tracing import TracingManager
-from .metrics import MetricsCollector
+from .metrics import get_metrics_collector
 from .logging import StructuredLogger
 from .utils import get_client_ip, is_excluded_path
 from .exceptions import ObservabilityError
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('django_observability')
 
 
 class ObservabilityMiddleware(MiddlewareMixin):
@@ -50,7 +50,7 @@ class ObservabilityMiddleware(MiddlewareMixin):
 
         # Initialize components
         self.tracing_manager = TracingManager(self.config) if self.config.is_tracing_enabled() else None
-        self.metrics_collector = MetricsCollector(self.config) if self.config.is_metrics_enabled() else None
+        self.metrics_collector = get_metrics_collector(self.config) if self.config.is_metrics_enabled() else None
         self.structured_logger = StructuredLogger(self.config) if self.config.is_logging_enabled() else None
 
         super().__init__(get_response)
@@ -76,6 +76,7 @@ class ObservabilityMiddleware(MiddlewareMixin):
             None to continue processing, or HttpResponse to short-circuit
         """
         if is_excluded_path(request.path, self.config.get('EXCLUDE_PATHS', [])):
+            logger.debug(f"Skipping request due to excluded path: {request.path}")
             return None
 
         # Add correlation ID to request
@@ -84,6 +85,7 @@ class ObservabilityMiddleware(MiddlewareMixin):
         request.observability_start_time = time.time()
 
         try:
+            logger.debug(f"Processing request: {request.method} {request.path}, correlation_id={correlation_id}")
             # Start tracing
             if self.tracing_manager:
                 span = self.tracing_manager.start_request_span(request, correlation_id)
@@ -95,7 +97,8 @@ class ObservabilityMiddleware(MiddlewareMixin):
 
             # Increment request counter
             if self.metrics_collector:
-                self.metrics_collector.increment_request_counter(request)
+                logger.debug(f"Calling start_request for {request.method} {request.path}")
+                self.metrics_collector.start_request(request)
 
         except Exception as e:
             logger.error(
@@ -120,6 +123,7 @@ class ObservabilityMiddleware(MiddlewareMixin):
             The response object (potentially modified)
         """
         if not hasattr(request, 'observability_correlation_id'):
+            logger.debug(f"No correlation ID for response: {request.method} {request.path}")
             return response
 
         correlation_id = request.observability_correlation_id
@@ -131,10 +135,11 @@ class ObservabilityMiddleware(MiddlewareMixin):
             else:
                 duration = 0.0
 
+            logger.debug(f"Processing response: {request.method} {request.path}, status={response.status_code}, duration={duration}, correlation_id={correlation_id}")
+
             # Record metrics
             if self.metrics_collector:
-                self.metrics_collector.record_request_duration(request, response, duration)
-                self.metrics_collector.increment_response_counter(request, response)
+                self.metrics_collector.end_request(request, response, duration)
 
             # End tracing
             if self.tracing_manager and hasattr(request, 'observability_span'):
@@ -178,6 +183,7 @@ class ObservabilityMiddleware(MiddlewareMixin):
         correlation_id = getattr(request, 'observability_correlation_id', 'unknown')
 
         try:
+            logger.debug(f"Processing exception for {request.method} {request.path}: {exception.__class__.__name__}, correlation_id={correlation_id}")
             # Record exception in tracing
             if self.tracing_manager and hasattr(request, 'observability_span'):
                 self.tracing_manager.record_exception(request.observability_span, exception)
@@ -230,7 +236,7 @@ class AsyncObservabilityMiddleware:
 
         # Initialize components
         self.tracing_manager = TracingManager(self.config) if self.config.is_tracing_enabled() else None
-        self.metrics_collector = MetricsCollector(self.config) if self.config.is_metrics_enabled() else None
+        self.metrics_collector = get_metrics_collector(self.config) if self.config.is_metrics_enabled() else None
         self.structured_logger = StructuredLogger(self.config) if self.config.is_logging_enabled() else None
 
         logger.info("Django Observability Async Middleware initialized")
@@ -247,6 +253,7 @@ class AsyncObservabilityMiddleware:
         """
         # Skip excluded paths
         if is_excluded_path(request.path, self.config.get('EXCLUDE_PATHS', [])):
+            logger.debug(f"Skipping request due to excluded path: {request.path}")
             return await self.get_response(request)
 
         # Add correlation ID and start time
@@ -257,6 +264,7 @@ class AsyncObservabilityMiddleware:
         span = None
 
         try:
+            logger.debug(f"Processing request: {request.method} {request.path}, correlation_id={correlation_id}")
             # Start tracing
             if self.tracing_manager:
                 span = self.tracing_manager.start_request_span(request, correlation_id)
@@ -268,7 +276,8 @@ class AsyncObservabilityMiddleware:
 
             # Increment request counter
             if self.metrics_collector:
-                self.metrics_collector.increment_request_counter(request)
+                logger.debug(f"Calling start_request for {request.method} {request.path}")
+                self.metrics_collector.start_request(request)
 
             # Process the request
             response = await self.get_response(request)
@@ -276,10 +285,11 @@ class AsyncObservabilityMiddleware:
             # Calculate duration
             duration = time.time() - request.observability_start_time
 
+            logger.debug(f"Processing response: {request.method} {request.path}, status={response.status_code}, duration={duration}, correlation_id={correlation_id}")
+
             # Record metrics
             if self.metrics_collector:
-                self.metrics_collector.record_request_duration(request, response, duration)
-                self.metrics_collector.increment_response_counter(request, response)
+                self.metrics_collector.end_request(request, response, duration)
 
             # Log response
             if self.structured_logger:
@@ -291,6 +301,7 @@ class AsyncObservabilityMiddleware:
 
         except Exception as exception:
             try:
+                logger.debug(f"Processing exception for {request.method} {request.path}: {exception.__class__.__name__}, correlation_id={correlation_id}")
                 if self.tracing_manager and span:
                     self.tracing_manager.record_exception(span, exception)
 

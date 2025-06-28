@@ -1,41 +1,40 @@
 """
 OpenTelemetry Tracing Integration for Django.
 
-This module provides comprehensive distributed tracing capabilities using OpenTelemetry,
-including automatic instrumentation of Django requests, database queries, and templates.
+This module provides distributed tracing capabilities using OpenTelemetry,
+including automatic instrumentation of Django requests.
 """
 import logging
-from typing import Optional, Dict, Any
-from urllib.parse import urlparse
-
-try:
-    from opentelemetry import trace
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
-    from opentelemetry.exporter.zipkin.json import ZipkinExporter
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.semconv.trace import SpanAttributes
-    from opentelemetry.propagate import extract, inject
-    from opentelemetry.trace.status import Status, StatusCode
-    from opentelemetry.instrumentation.django import DjangoInstrumentor
-    from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-    from opentelemetry.instrumentation.redis import RedisInstrumentor
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
-
-    OPENTELEMETRY_AVAILABLE = True
-except ImportError:
-    OPENTELEMETRY_AVAILABLE = False
-
+from typing import Optional
 from django.http import HttpRequest, HttpResponse
 from django.conf import settings
 
+logger = logging.getLogger('django_observability.tracing')
+
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.instrumentation.django import DjangoInstrumentor
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.semconv.trace import SpanAttributes
+    OPENTELEMETRY_AVAILABLE = True
+    OTLP_AVAILABLE = False
+    try:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        OTLP_AVAILABLE = True
+    except ImportError as e:
+        logger.warning(f"OTLPSpanExporter import failed: {str(e)}. Falling back to ConsoleSpanExporter.")
+    logger.debug("OpenTelemetry imports successful: trace=%s, TracerProvider=%s, BatchSpanProcessor=%s, DjangoInstrumentor=%s, OTLPSpanExporter=%s",
+                 getattr(trace, '__version__', 'unknown'), TracerProvider.__module__, BatchSpanProcessor.__module__,
+                 DjangoInstrumentor.__module__, 'available' if OTLP_AVAILABLE else 'not available')
+except ImportError as e:
+    OPENTELEMETRY_AVAILABLE = False
+    OTLP_AVAILABLE = False
+    logger.error(f"OpenTelemetry import failed: {str(e)}. Ensure opentelemetry-api==1.34.1, opentelemetry-sdk==1.34.1, opentelemetry-instrumentation-django==0.55b1 are installed.")
+
 from .config import ObservabilityConfig
-from .utils import get_client_ip, sanitize_headers
-
-
-logger = logging.getLogger(__name__)
+from .utils import get_client_ip, get_view_name
 
 
 class TracingManager:
@@ -43,10 +42,10 @@ class TracingManager:
     Manages OpenTelemetry tracing for Django applications.
 
     This class handles:
-    - Tracer provider setup and configuration
-    - Span creation and management for HTTP requests
-    - Integration with Django's request/response cycle
-    - Automatic instrumentation of database and cache operations
+    - Tracer provider setup with OTLP or console exporter
+    - Span creation for HTTP requests
+    - Django auto-instrumentation
+    - Exception recording
     """
 
     def __init__(self, config: ObservabilityConfig):
@@ -58,113 +57,83 @@ class TracingManager:
         """
         self.config = config
         self.tracer = None
+        self._span_processor = None
         self._initialized = False
 
         if not OPENTELEMETRY_AVAILABLE:
-            logger.warning(
-                "OpenTelemetry not available. Install with: "
-                "pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-django"
-            )
+            logger.warning("Tracing disabled: OpenTelemetry not available")
             return
 
-        self._setup_tracing()
-        self._setup_instrumentations()
-
-    def _setup_tracing(self) -> None:
-        """Setup OpenTelemetry tracer provider and exporters."""
         try:
-            # Create resource with service information
-            resource = Resource.create({
-                "service.name": self.config.get_service_name(),
-                "service.version": getattr(settings, 'VERSION', '1.0.0'),
-                "deployment.environment": getattr(settings, 'ENVIRONMENT', 'development'),
-            })
-
-            # Create tracer provider with sampling
-            from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
-            tracer_provider = TracerProvider(
-                resource=resource,
-                sampler=TraceIdRatioBased(self.config.get_sample_rate())
-            )
-
-            # Setup exporters
-            self._setup_exporters(tracer_provider)
-
-            # Set the global tracer provider
-            trace.set_tracer_provider(tracer_provider)
-
-            # Create tracer
-            self.tracer = trace.get_tracer(__name__)
-
+            self._setup_tracing()
+            self._setup_instrumentations()
             self._initialized = True
             logger.info(
                 "OpenTelemetry tracing initialized",
                 extra={
                     "service_name": self.config.get_service_name(),
                     "sample_rate": self.config.get_sample_rate(),
+                    "debug_mode": self.config.get('DEBUG_MODE', False),
+                    "version": getattr(settings, 'VERSION', '1.0.0'),
+                    "environment": getattr(settings, 'ENVIRONMENT', 'development'),
                 }
             )
-
         except Exception as e:
-            logger.error("Failed to initialize OpenTelemetry tracing", exc_info=True)
+            logger.error(f"Failed to initialize tracing: {str(e)}", exc_info=True)
             if self.config.get('DEBUG_MODE', False):
                 raise
 
-    def _setup_exporters(self, tracer_provider: TracerProvider) -> None:
-        """Setup trace exporters based on configuration."""
-        exporters = []
+    def _setup_tracing(self) -> None:
+        """
+        Setup OpenTelemetry tracer provider and exporters.
+        """
+        # Create resource with service information
+        resource = Resource.create({
+            "service.name": self.config.get_service_name(),
+            "service.version": getattr(settings, 'VERSION', '1.0.0'),
+            "deployment.environment": getattr(settings, 'ENVIRONMENT', 'development'),
+        })
 
-        # OTLP Exporter (preferred)
+        # Create tracer provider
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+        tracer_provider = TracerProvider(
+            resource=resource,
+            sampler=TraceIdRatioBased(self.config.get_sample_rate())
+        )
+
+        # Setup exporters
         otlp_endpoint = self.config.get('TRACING_EXPORT_ENDPOINT')
-        if otlp_endpoint:
+        if otlp_endpoint and OTLP_AVAILABLE:
             try:
                 exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
-                exporters.append(exporter)
+                self._span_processor = BatchSpanProcessor(exporter)
+                tracer_provider.add_span_processor(self._span_processor)
                 logger.info(f"OTLP exporter configured: {otlp_endpoint}")
             except Exception as e:
-                logger.error(f"Failed to setup OTLP exporter: {e}")
+                logger.error(f"Failed to setup OTLP exporter: {str(e)}. Falling back to ConsoleSpanExporter.")
+                exporter = ConsoleSpanExporter()
+                self._span_processor = BatchSpanProcessor(exporter)
+                tracer_provider.add_span_processor(self._span_processor)
+                logger.info("ConsoleSpanExporter configured as fallback")
+        else:
+            exporter = ConsoleSpanExporter()
+            self._span_processor = BatchSpanProcessor(exporter)
+            tracer_provider.add_span_processor(self._span_processor)
+            logger.info("ConsoleSpanExporter configured for development")
 
-        # Jaeger Exporter (fallback)
-        jaeger_endpoint = self.config.get('JAEGER_ENDPOINT')
-        if jaeger_endpoint and not exporters:
-            try:
-                parsed_url = urlparse(jaeger_endpoint)
-                exporter = JaegerExporter(
-                    agent_host_name=parsed_url.hostname,
-                    agent_port=parsed_url.port or 14268,
-                )
-                exporters.append(exporter)
-                logger.info(f"Jaeger exporter configured: {jaeger_endpoint}")
-            except Exception as e:
-                logger.error(f"Failed to setup Jaeger exporter: {e}")
-
-        # Zipkin Exporter (additional fallback)
-        zipkin_endpoint = self.config.get('ZIPKIN_ENDPOINT')
-        if zipkin_endpoint and not exporters:
-            try:
-                exporter = ZipkinExporter(endpoint=zipkin_endpoint)
-                exporters.append(exporter)
-                logger.info(f"Zipkin exporter configured: {zipkin_endpoint}")
-            except Exception as e:
-                logger.error(f"Failed to setup Zipkin exporter: {e}")
-
-        # Console Exporter (development)
-        if self.config.get('DEBUG_MODE', False) or not exporters:
-            exporters.append(ConsoleSpanExporter())
-            logger.info("Console exporter configured")
-
-        # Add processors for each exporter
-        for exporter in exporters:
-            processor = BatchSpanProcessor(exporter)
-            tracer_provider.add_span_processor(processor)
+        # Set global tracer provider
+        trace.set_tracer_provider(tracer_provider)
+        self.tracer = trace.get_tracer('django_observability')
+        logger.debug(f"Tracer initialized: {self.tracer}")
 
     def _setup_instrumentations(self) -> None:
-        """Setup automatic instrumentation for Django and related libraries."""
+        """
+        Setup automatic instrumentation for Django.
+        """
         if not self._initialized:
             return
 
         try:
-            # Django instrumentation
             if not DjangoInstrumentor().is_instrumented_by_opentelemetry:
                 DjangoInstrumentor().instrument(
                     tracer_provider=trace.get_tracer_provider(),
@@ -172,85 +141,65 @@ class TracingManager:
                     response_hook=self._response_hook
                 )
                 logger.info("Django auto-instrumentation enabled")
-
-            # Database instrumentation
-            if self.config.get('INTEGRATE_DB_TRACING', True):
-                try:
-                    Psycopg2Instrumentor().instrument()
-                    logger.info("Psycopg2 instrumentation enabled")
-                except ImportError:
-                    logger.warning("Psycopg2 instrumentation not available")
-
-                try:
-                    from opentelemetry.instrumentation.dbapi import DatabaseApiIntegration
-                    DatabaseApiIntegration(
-                        connection,
-                        "django.db",
-                        "sql",
-                        enable_commenter=True,
-                        commenter_options={"db_driver": "django"}
-                    ).instrument()
-                except Exception as e:
-                    logger.error(f"Failed to instrument database: {e}")
-
-            # Cache instrumentation
-            if self.config.get('INTEGRATE_CACHE_TRACING', True):
-                try:
-                    RedisInstrumentor().instrument()
-                    logger.info("Redis cache instrumentation enabled")
-                except ImportError:
-                    logger.warning("Redis instrumentation not available")
-
-            # HTTP requests instrumentation
-            if self.config.get('INTEGRATE_REQUESTS_TRACING', True):
-                try:
-                    RequestsInstrumentor().instrument()
-                    logger.info("Requests instrumentation enabled")
-                except ImportError:
-                    logger.warning("Requests instrumentation not available")
-
         except Exception as e:
-            logger.error("Failed to setup instrumentations", exc_info=True)
+            logger.error(f"Failed to setup Django instrumentation: {str(e)}", exc_info=True)
             if self.config.get('DEBUG_MODE', False):
                 raise
 
     def _request_hook(self, span: trace.Span, request: HttpRequest) -> None:
-        """Add custom attributes to request spans."""
+        """
+        Add custom attributes to request spans.
+
+        Args:
+            span: The OpenTelemetry span
+            request: The Django HttpRequest object
+        """
         if not span:
             return
 
-        span.set_attributes({
-            SpanAttributes.HTTP_METHOD: request.method,
-            SpanAttributes.HTTP_URL: request.build_absolute_uri(),
-            SpanAttributes.HTTP_SCHEME: request.scheme,
-            SpanAttributes.HTTP_HOST: request.get_host(),
-            SpanAttributes.NET_PEER_IP: get_client_ip(request),
-            "http.user_agent": request.META.get('HTTP_USER_AGENT', ''),
-            "http.route": get_view_name(request),
-        })
-
-        if self.config.get('LOGGING_INCLUDE_HEADERS', False):
-            headers = sanitize_headers(request.META, self.config.get_sensitive_headers())
-            for key, value in headers.items():
-                span.set_attribute(f"http.header.{key.lower()}", value)
-
-        if hasattr(request, 'user') and request.user.is_authenticated:
+        try:
             span.set_attributes({
-                "user.id": str(request.user.id),
-                "user.username": request.user.username,
-                "user.is_staff": request.user.is_staff,
-                "user.is_superuser": request.user.is_superuser,
+                SpanAttributes.HTTP_METHOD: request.method,
+                SpanAttributes.HTTP_URL: request.build_absolute_uri(),
+                SpanAttributes.HTTP_SCHEME: request.scheme,
+                SpanAttributes.HTTP_HOST: request.get_host(),
+                SpanAttributes.NET_PEER_IP: get_client_ip(request),
+                "http.user_agent": request.META.get('HTTP_USER_AGENT', 'unknown'),
+                "http.route": get_view_name(request),
             })
+            logger.debug(f"Set request attributes for span: {request.method} {request.path}")
+        except Exception as e:
+            logger.error(f"Failed to set request attributes: {str(e)}")
 
     def _response_hook(self, span: trace.Span, request: HttpRequest, response: HttpResponse) -> None:
-        """Add custom attributes to response spans."""
+        """
+        Add custom attributes to response spans.
+
+        Args:
+            span: The OpenTelemetry span
+            request: The Django HttpRequest object
+            response: The Django HttpResponse object
+        """
         if not span:
             return
 
-        span.set_attributes({
-            SpanAttributes.HTTP_STATUS_CODE: response.status_code,
-            "http.response_content_length": len(response.content) if hasattr(response, 'content') else 0,
-        })
+        try:
+            span.set_attributes({
+                SpanAttributes.HTTP_STATUS_CODE: response.status_code,
+                "http.response_content_length": len(response.content) if hasattr(response, 'content') else 0,
+            })
+            logger.debug(f"Set response attributes for span: {request.method} {request.path}, status={response.status_code}")
+        except Exception as e:
+            logger.error(f"Failed to set response attributes: {str(e)}")
+
+    def is_available(self) -> bool:
+        """
+        Check if tracing is available and properly initialized.
+
+        Returns:
+            True if tracing is available, False otherwise
+        """
+        return OPENTELEMETRY_AVAILABLE and self._initialized and self.tracer is not None
 
     def start_request_span(self, request: HttpRequest, correlation_id: str) -> Optional[trace.Span]:
         """
@@ -263,43 +212,31 @@ class TracingManager:
         Returns:
             The created span, or None if tracing is not available
         """
-        if not self._initialized or not self.tracer:
+        if not self.is_available():
+            logger.debug("Cannot start span: tracing not available")
             return None
 
-        # Extract context from headers for distributed tracing
-        carrier = {key: value for key, value in request.META.items() if key.startswith('HTTP_')}
-        context = extract(carrier)
+        try:
+            span = self.tracer.start_span(
+                name=f"{request.method} {get_view_name(request)}",
+                attributes={
+                    SpanAttributes.HTTP_METHOD: request.method,
+                    SpanAttributes.HTTP_URL: request.build_absolute_uri(),
+                    SpanAttributes.HTTP_SCHEME: request.scheme,
+                    SpanAttributes.HTTP_HOST: request.get_host(),
+                    SpanAttributes.NET_PEER_IP: get_client_ip(request),
+                    "http.user_agent": request.META.get('HTTP_USER_AGENT', 'unknown'),
+                    "http.correlation_id": correlation_id,
+                    "http.route": get_view_name(request),
+                }
+            )
+            logger.debug(f"Started span for {request.method} {request.path}: {span}")
+            return span
+        except Exception as e:
+            logger.error(f"Failed to start span for {request.method} {request.path}: {str(e)}")
+            return None
 
-        # Start span
-        span = self.tracer.start_span(
-            name=f"{request.method} {request.path}",
-            context=context,
-            kind=trace.SpanKind.SERVER,
-            attributes={
-                SpanAttributes.HTTP_METHOD: request.method,
-                SpanAttributes.HTTP_URL: request.build_absolute_uri(),
-                SpanAttributes.HTTP_SCHEME: request.scheme,
-                SpanAttributes.HTTP_HOST: request.get_host(),
-                "http.correlation_id": correlation_id,
-            }
-        )
-
-        # Activate span context
-        trace.set_span_in_context(span, context)
-
-        # Inject context into response headers
-        inject(carrier)
-        request.observability_carrier = carrier
-
-        return span
-
-    def end_request_span(
-        self, 
-        span: Optional[trace.Span], 
-        request: HttpRequest, 
-        response: Optional[HttpResponse], 
-        duration: float
-    ) -> None:
+    def end_request_span(self, span: Optional[trace.Span], request: HttpRequest, response: Optional[HttpResponse], duration: float) -> None:
         """
         End a request span and set final attributes.
 
@@ -309,21 +246,27 @@ class TracingManager:
             response: The Django HttpResponse object (optional)
             duration: The request duration in seconds
         """
-        if not span or not self._initialized:
+        if not self.is_available() or not span:
+            logger.debug("Cannot end span: tracing not available or span is None")
             return
 
         try:
             if response:
                 span.set_attribute(SpanAttributes.HTTP_STATUS_CODE, response.status_code)
+                span.set_attribute("http.response_content_length", len(response.content) if hasattr(response, 'content') else 0)
                 if response.status_code >= 400:
-                    span.set_status(Status(StatusCode.ERROR))
+                    span.set_status(trace.Status(trace.StatusCode.ERROR))
                 else:
-                    span.set_status(Status(StatusCode.OK))
-
+                    span.set_status(trace.Status(trace.StatusCode.OK))
             span.set_attribute("http.duration_ms", duration * 1000)
             span.end()
+            logger.debug(f"Ended span for {request.method} {request.path}")
+            # Force flush spans for console output
+            if self._span_processor:
+                self._span_processor.force_flush()
+                logger.debug("Span processor flushed")
         except Exception as e:
-            logger.error("Failed to end request span", exc_info=True)
+            logger.error(f"Failed to end span for {request.method} {request.path}: {str(e)}")
 
     def record_exception(self, span: Optional[trace.Span], exception: Exception) -> None:
         """
@@ -333,11 +276,17 @@ class TracingManager:
             span: The span to record the exception in
             exception: The exception to record
         """
-        if not span or not self._initialized:
+        if not self.is_available() or not span:
+            logger.debug("Cannot record exception: tracing not available or span is None")
             return
 
         try:
             span.record_exception(exception)
-            span.set_status(Status(StatusCode.ERROR, str(exception)))
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(exception)))
+            logger.debug(f"Recorded exception in span: {exception.__class__.__name__}")
+            # Force flush spans for console output
+            if self._span_processor:
+                self._span_processor.force_flush()
+                logger.debug("Span processor flushed after exception")
         except Exception as e:
-            logger.error("Failed to record exception in span", exc_info=True)
+            logger.error(f"Failed to record exception: {str(e)}")
