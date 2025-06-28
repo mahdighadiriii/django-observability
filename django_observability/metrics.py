@@ -12,7 +12,6 @@ from django.conf import settings
 from django import get_version as django_get_version
 from prometheus_client import Counter, Gauge, Histogram, Info
 
-
 try:
     from prometheus_client import (
         Counter, Histogram, Gauge, Info,
@@ -31,12 +30,10 @@ from django.core.cache import cache
 from .config import ObservabilityConfig
 from .utils import get_client_ip, get_view_name
 
-
 logger = logging.getLogger('django_observability.metrics')
 
 # Singleton MetricsCollector instance
 _metrics_collector_instance = None
-
 
 def get_metrics_collector(config: ObservabilityConfig) -> 'MetricsCollector':
     """Return a singleton MetricsCollector instance."""
@@ -44,7 +41,6 @@ def get_metrics_collector(config: ObservabilityConfig) -> 'MetricsCollector':
     if _metrics_collector_instance is None:
         _metrics_collector_instance = MetricsCollector(config)
     return _metrics_collector_instance
-
 
 class MetricsCollector:
     """
@@ -190,11 +186,13 @@ class MetricsCollector:
         original_execute = connection.cursor().execute
         
         def wrapped_execute(self, sql, params=()):
+            logger.debug(f"Executing query: {sql}, params={params}")
             start_time = time.time()
             try:
                 result = original_execute(sql, params)
                 duration = time.time() - start_time
                 query_type = self._get_query_type(sql)
+                logger.debug(f"Query completed: type={query_type}, duration={duration}")
                 self.record_db_query(
                     db_alias=connection.alias,
                     query_type=query_type,
@@ -202,6 +200,7 @@ class MetricsCollector:
                 )
                 return result
             except Exception as e:
+                logger.error(f"Query failed: {sql}", exc_info=True)
                 self.increment_exception_counter(None, e)
                 raise
         
@@ -211,8 +210,10 @@ class MetricsCollector:
     def _instrument_cache(self) -> None:
         """Instrument cache operations for metrics."""
         original_get = cache.get
+        original_set = cache.set
         
         def wrapped_get(key, *args, **kwargs):
+            logger.debug(f"Cache get: key={key}")
             start_time = time.time()
             try:
                 result = original_get(key, *args, **kwargs)
@@ -230,7 +231,26 @@ class MetricsCollector:
                 )
                 raise
         
+        def wrapped_set(key, value, timeout=None, *args, **kwargs):
+            logger.debug(f"Cache set: key={key}")
+            try:
+                result = original_set(key, value, timeout, *args, **kwargs)
+                self.record_cache_operation(
+                    cache_name='default',
+                    operation='set',
+                    result='success'
+                )
+                return result
+            except Exception as e:
+                self.record_cache_operation(
+                    cache_name='default',
+                    operation='set',
+                    result='error'
+                )
+                raise
+        
         cache.get = wrapped_get
+        cache.set = wrapped_set
         logger.info("Cache metrics instrumentation enabled")
     
     def _get_query_type(self, sql: str) -> str:
@@ -261,6 +281,8 @@ class MetricsCollector:
             return
         logger.debug(f"MetricsCollector: Starting request {request.method} {request.path}")
         self.increment_request_counter(request)
+        self._instrument_database()  # Reapply per request
+        self._instrument_cache()     # Reapply per request
     
     def end_request(self, request: HttpRequest, response: HttpResponse, duration: float) -> None:
         """
@@ -634,7 +656,6 @@ class MetricsCollector:
             logger.error(f"Failed to create custom gauge {name}", exc_info=True)
             return None
 
-
 def metrics_view(request: HttpRequest) -> HttpResponse:
     """
     View to expose Prometheus metrics.
@@ -659,7 +680,6 @@ django_info = Info(
     'Django application information',
     ['debug', 'django_version', 'environment', 'version']
 )
-
 
 def initialize_metrics():
     django_info.labels(

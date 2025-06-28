@@ -1,8 +1,6 @@
 from pathlib import Path
-
 from setuptools import find_packages, setup
 
-# Read the long description from README.md
 long_description = Path("README.md").read_text(encoding="utf-8")
 
 setup(
@@ -22,18 +20,24 @@ setup(
     packages=find_packages(exclude=["tests", "tests.*"]),
     include_package_data=True,
     install_requires=[
-        "django>=3.2",
-        "opentelemetry-api>=1.20.0",
-        "opentelemetry-sdk>=1.20.0",
-        "opentelemetry-instrumentation-django>=0.35b0",
-        "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
-        "prometheus-client>=0.17.0",
-        "structlog>=23.1.0",
+        "django>=3.2,<6.0",
+        "setuptools<81",
+        "opentelemetry-api==1.21.0",
+        "opentelemetry-sdk==1.21.0",
+        "opentelemetry-instrumentation-django==0.42b0",
+        "opentelemetry-instrumentation-psycopg2==0.42b0",
+        "opentelemetry-instrumentation-redis==0.42b0",
+        "opentelemetry-instrumentation-requests==0.42b0",
+        "opentelemetry-exporter-otlp-proto-grpc==1.21.0",
+        "opentelemetry-exporter-jaeger-thrift==1.21.0",
+        "opentelemetry-exporter-zipkin==1.21.0",
+        "prometheus-client>=0.17.0,<1.0.0",
+        "structlog>=23.1.0,<26.0.0",
     ],
     extras_require={
         "dev": [
             "pytest>=7.4.0",
-            "pytest-django>=4.5.2",
+            "pytest-django>=4.8.0",
             "pytest-cov>=4.1.0",
             "pytest-asyncio>=0.21.1",
             "flake8>=6.0.0",
@@ -42,6 +46,17 @@ setup(
             "mypy>=1.5.1",
             "requests-mock>=1.11.0",
             "pre-commit>=3.3.3",
+            "ruff>=0.4.3",
+            "opentelemetry-exporter-jaeger-thrift==1.21.0",
+        ],
+        "sqlite": [
+            "opentelemetry-instrumentation-sqlite3==0.42b0",
+        ],
+        "mysql": [
+            "opentelemetry-instrumentation-mysql==0.42b0",
+        ],
+        "memcached": [
+            "opentelemetry-instrumentation-memcached==0.42b0",
         ],
     },
     classifiers=[
@@ -64,6 +79,6 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: System :: Monitoring",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     license="MIT",
 )
