@@ -143,6 +143,15 @@ class ObservabilityConfig:
         if not isinstance(exclude_paths, list):
             raise ImproperlyConfigured("EXCLUDE_PATHS must be a list")
 
+    def _ensure_initialized(self) -> None:
+        """Ensure configuration is initialized (for testing compatibility)."""
+        if not hasattr(self, '_config') or self._config is None:
+            self._config = self._load_config()
+
+    def force_reload(self) -> None:
+        """Force reload configuration (for testing)."""
+        self._config = self._load_config()
+
     def get(self, key: str, default=None):
         """Get configuration value."""
         return self._config.get(key, default)
@@ -177,7 +186,10 @@ class ObservabilityConfig:
 
     def get_sample_rate(self) -> float:
         """Get the tracing sample rate."""
-        return self._config.get('TRACING_SAMPLE_RATE', 0.1)
+        sample_rate = self._config.get('TRACING_SAMPLE_RATE', 0.1)
+        if not 0.0 <= sample_rate <= 1.0:
+            raise ValueError(f"TRACING_SAMPLE_RATE must be between 0.0 and 1.0, got {sample_rate}")
+        return sample_rate
 
     def get_metrics_prefix(self) -> str:
         """Get the metrics prefix."""
@@ -190,6 +202,10 @@ class ObservabilityConfig:
     def get_sensitive_headers(self) -> List[str]:
         """Get list of sensitive headers to exclude from logging."""
         return self._config.get('LOGGING_SENSITIVE_HEADERS', [])
+
+    def get_exclude_paths(self) -> List[str]:
+        """Get list of paths to exclude from tracing."""
+        return self._config.get('EXCLUDE_PATHS', [])
 
     def as_dict(self) -> Dict[str, Any]:
         """Return configuration as dictionary (useful for debugging)."""

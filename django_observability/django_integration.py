@@ -16,7 +16,6 @@ class DjangoIntegration:
     """
     Handles Django-specific observability integrations for database, cache, and templates.
     """
-    
     def __init__(self, config: ObservabilityConfig):
         """
         Initialize the Django integration.
@@ -25,6 +24,8 @@ class DjangoIntegration:
             config: The observability configuration instance
         """
         self.config = config
+        if os.getenv('PYTEST_CURRENT_TEST') and not config.get('ENABLE_TEST_INTEGRATION', False):
+            return
         self.tracer = trace.get_tracer(__name__)
         self._setup_integrations()
     

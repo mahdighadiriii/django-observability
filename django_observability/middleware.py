@@ -34,14 +34,14 @@ class ObservabilityMiddleware(MiddlewareMixin):
     - Request/response timing and metadata
     """
 
-    def __init__(self, get_response: Optional[Callable] = None):
+    def __init__(self, get_response: Optional[Callable] = None, config=None):
         """
         Initialize the middleware.
 
         Args:
             get_response: The next middleware or view function in the chain
         """
-        self.config = get_config()
+        self.config = config or get_config()
 
         # Check if observability is enabled
         if not self.config.is_enabled():
@@ -214,7 +214,7 @@ class AsyncObservabilityMiddleware:
     but is designed to work with Django's async views and middleware stack.
     """
 
-    def __init__(self, get_response: Callable):
+    def __init__(self, get_response: Callable, config=None):
         """
         Initialize the async middleware.
 
@@ -277,7 +277,10 @@ class AsyncObservabilityMiddleware:
             # Increment request counter
             if self.metrics_collector:
                 logger.debug(f"Calling start_request for {request.method} {request.path}")
-                self.metrics_collector.start_request(request)
+                if not hasattr(self.metrics_collector, '_instrument_database'):
+                    self.metrics_collector.start_request(request)
+                else:
+                    logger.debug("Skipping database instrumentation in async context")
 
             # Process the request
             response = await self.get_response(request)

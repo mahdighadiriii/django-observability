@@ -4,18 +4,16 @@ from django.http import HttpResponse
 from django_observability.middleware import ObservabilityMiddleware, AsyncObservabilityMiddleware
 from django_observability.config import ObservabilityConfig
 
-
 @pytest.mark.django_db
 def test_middleware_initialization(config):
     """Test middleware initialization."""
     def get_response(request):
         return HttpResponse()
-    middleware = ObservabilityMiddleware(get_response)
-    assert middleware.config == config
+    middleware = ObservabilityMiddleware(get_response, config=config)
+    assert middleware.config is config
     assert middleware.tracing_manager is not None
     assert middleware.metrics_collector is not None
     assert middleware.structured_logger is not None
-
 
 @pytest.mark.django_db
 def test_middleware_process_request(request_factory):
@@ -31,7 +29,6 @@ def test_middleware_process_request(request_factory):
     assert hasattr(request, 'observability_start_time')
     assert hasattr(request, 'observability_span')
 
-
 @pytest.mark.django_db
 def test_middleware_process_response(request_factory):
     """Test process_response records metrics and ends tracing."""
@@ -45,7 +42,6 @@ def test_middleware_process_response(request_factory):
     result = middleware.process_response(request, response)
     assert isinstance(result, HttpResponse)
     assert result.status_code == 200
-
 
 @pytest.mark.asyncio
 async def test_async_middleware(request_factory):

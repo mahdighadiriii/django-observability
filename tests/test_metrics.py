@@ -5,7 +5,6 @@ from prometheus_client import CollectorRegistry
 from django_observability.metrics import MetricsCollector
 from django_observability.config import ObservabilityConfig
 
-
 @pytest.mark.django_db
 def test_metrics_collector_initialization(config):
     """Test MetricsCollector initialization."""
@@ -13,7 +12,6 @@ def test_metrics_collector_initialization(config):
     assert collector.is_available()
     assert collector._initialized
     assert collector.registry is not None
-
 
 @pytest.mark.django_db
 def test_record_request_duration(request_factory, config):
@@ -27,9 +25,8 @@ def test_record_request_duration(request_factory, config):
     collector.increment_response_counter(request, response)
     
     metrics = collector.get_metrics()
-    assert 'django_app_http_request_duration_seconds' in metrics
-    assert 'django_app_http_requests_total' in metrics
-
+    assert 'test_app_http_request_duration_seconds' in metrics
+    assert 'test_app_http_requests_total' in metrics
 
 @pytest.mark.django_db
 def test_record_exception(request_factory, config):
@@ -40,8 +37,7 @@ def test_record_exception(request_factory, config):
     
     collector.increment_exception_counter(request, exception)
     metrics = collector.get_metrics()
-    assert 'django_app_http_exceptions_total' in metrics
-
+    assert 'test_app_http_exceptions_total' in metrics
 
 @pytest.mark.django_db
 def test_custom_metrics(config):
@@ -54,3 +50,12 @@ def test_custom_metrics(config):
     assert counter is not None
     assert histogram is not None
     assert gauge is not None
+
+@pytest.mark.django_db
+def test_custom_counter_usage(config):
+    """Test creating and incrementing a custom counter."""
+    collector = MetricsCollector(config)
+    counter = collector.create_custom_counter("test_counter", "Test counter", ["label"])
+    counter.labels(label="value").inc()
+    metrics = collector.get_metrics()
+    assert "test_app_test_counter_total" in metrics
