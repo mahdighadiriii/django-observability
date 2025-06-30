@@ -1,9 +1,3 @@
-"""
-Prometheus Metrics Collection for Django.
-
-This module provides comprehensive metrics collection using Prometheus,
-including HTTP request metrics, Django-specific metrics, and custom business metrics.
-"""
 import time
 import logging
 from typing import Dict, List, Optional, Any
@@ -23,7 +17,6 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
 
 from django.http import HttpRequest, HttpResponse
-from django.conf import settings
 from django.db import connection
 from django.core.cache import cache
 
@@ -131,7 +124,7 @@ class MetricsCollector:
             labelnames=['db_alias', 'query_type'],
             registry=self.registry
         )
-        
+
         self.django_db_query_duration_seconds = Histogram(
             name=f'{prefix}_django_db_query_duration_seconds',
             documentation='Database query duration in seconds',
@@ -179,79 +172,117 @@ class MetricsCollector:
             if self.config.get('INTEGRATE_CACHE_TRACING', True):
                 self._instrument_cache()
         except Exception as e:
-            logger.error("Failed to setup metrics instrumentations", exc_info=True)
+            logger.error(f"Failed to setup metrics instrumentations: {e}")
     
     def _instrument_database(self) -> None:
         """Instrument database queries for metrics."""
-        original_execute = connection.cursor().execute
-        
-        def wrapped_execute(self, sql, params=()):
-            logger.debug(f"Executing query: {sql}, params={params}")
-            start_time = time.time()
-            try:
-                result = original_execute(sql, params)
-                duration = time.time() - start_time
-                query_type = self._get_query_type(sql)
-                logger.debug(f"Query completed: type={query_type}, duration={duration}")
-                self.record_db_query(
-                    db_alias=connection.alias,
-                    query_type=query_type,
-                    duration=duration
-                )
-                return result
-            except Exception as e:
-                logger.error(f"Query failed: {sql}", exc_info=True)
-                self.increment_exception_counter(None, e)
-                raise
-        
-        connection.cursor().execute = wrapped_execute
-        logger.info("Database metrics instrumentation enabled")
+        try:
+            original_execute = connection.cursor().execute
+            
+            def wrapped_execute(cursor, sql, params=()):
+                logger.debug(f"Executing query: {sql}, params={params}")
+                start_time = time.time()
+                try:
+                    result = original_execute(cursor, sql, params)
+                    duration = time.time() - start_time
+                    query_type = self._get_query_type(sql)
+                    logger.debug(f"Query completed: type={query_type}, duration={duration}")
+                    self.record_db_query(
+                        db_alias=connection.alias,
+                        query_type=query_type,
+                        duration=duration
+                    )
+                    return result
+                except Exception as e:
+                    logger.error(f"Query failed: {e}")
+                    self.increment_exception_counter(None, e)
+                    raise
+            
+            import types
+            connection.cursor().execute = types.MethodType(wrapped_execute, connection.cursor())
+            logger.info("Database metrics instrumentation enabled")
+        except Exception as e:
+            logger.error(f"Failed to record database instrumentation: {e}")
     
     def _instrument_cache(self) -> None:
         """Instrument cache operations for metrics."""
-        original_get = cache.get
-        original_set = cache.set
-        
-        def wrapped_get(key, *args, **kwargs):
-            logger.debug(f"Cache get: key={key}")
-            start_time = time.time()
-            try:
-                result = original_get(key, *args, **kwargs)
-                self.record_cache_operation(
-                    cache_name='default',
-                    operation='get',
-                    result='hit' if result is not None else 'miss'
-                )
-                return result
-            except Exception as e:
-                self.record_cache_operation(
-                    cache_name='default',
-                    operation='get',
-                    result='error'
-                )
-                raise
-        
-        def wrapped_set(key, value, timeout=None, *args, **kwargs):
-            logger.debug(f"Cache set: key={key}")
-            try:
-                result = original_set(key, value, timeout, *args, **kwargs)
-                self.record_cache_operation(
-                    cache_name='default',
-                    operation='set',
-                    result='success'
-                )
-                return result
-            except Exception as e:
-                self.record_cache_operation(
-                    cache_name='default',
-                    operation='set',
-                    result='error'
-                )
-                raise
-        
-        cache.get = wrapped_get
-        cache.set = wrapped_set
-        logger.info("Cache metrics instrumentation enabled")
+        try:
+            original_get = cache.get
+            original_set = cache.set
+            original_get_many = cache.get_many
+            
+            def wrapped_get(key, *args, **kwargs):
+                logger.debug(f"Cache get: key={key}")
+                try:
+                    start_time = time.time()
+                    result = original_get(key, *args, **kwargs)
+                    duration = time.time() - start_time
+                    self.record_cache_operation(
+                        cache_name='default',
+                        operation='get',
+                        result='hit' if result is not None else 'miss'
+                    )
+                    logger.debug(f"Cache get completed: key={key}, duration={duration}")
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to record cache operation: {e}")
+                    self.record_cache_operation(
+                        cache_name='default',
+                        operation='get',
+                        result='error'
+                    )
+                    raise
+            
+            def wrapped_set(key, value, timeout=None, *args, **kwargs):
+                logger.debug(f"Cache set: key={key}")
+                try:
+                    start_time = time.time()
+                    result = original_set(key, value, timeout, *args, **kwargs)
+                    duration = time.time() - start_time
+                    self.record_cache_operation(
+                        cache_name='default',
+                        operation='set',
+                        result='success'
+                    )
+                    logger.debug(f"Cache set completed: key={key}, duration={duration}")
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to record cache operation: {e}")
+                    self.record_cache_operation(
+                        cache_name='default',
+                        operation='set',
+                        result='error'
+                    )
+                    raise
+            
+            def wrapped_get_many(keys, *args, **kwargs):
+                logger.debug(f"Cache get_many: keys={keys}")
+                try:
+                    start_time = time.time()
+                    result = original_get_many(keys, *args, **kwargs)
+                    duration = time.time() - start_time
+                    self.record_cache_operation(
+                        cache_name='default',
+                        operation='get_many',
+                        result='hit' if result else 'miss'
+                    )
+                    logger.debug(f"Cache get_many completed: keys={keys}, duration={duration}")
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to record cache operation: {e}")
+                    self.record_cache_operation(
+                        cache_name='default',
+                        operation='get_many',
+                        result='error'
+                    )
+                    raise
+            
+            cache.get = wrapped_get
+            cache.set = wrapped_set
+            cache.get_many = wrapped_get_many
+            logger.info("Cache metrics instrumentation enabled")
+        except Exception as e:
+            logger.error(f"Failed to record cache instrumentation: {e}")
     
     def _get_query_type(self, sql: str) -> str:
         """Determine the type of SQL query."""
@@ -281,8 +312,8 @@ class MetricsCollector:
             return
         logger.debug(f"MetricsCollector: Starting request {request.method} {request.path}")
         self.increment_request_counter(request)
-        self._instrument_database()  # Reapply per request
-        self._instrument_cache()     # Reapply per request
+        self._instrument_database()
+        self._instrument_cache()
     
     def end_request(self, request: HttpRequest, response: HttpResponse, duration: float) -> None:
         """
@@ -313,7 +344,7 @@ class MetricsCollector:
             self.django_active_requests.inc()
             logger.debug(f"Incremented active requests for {request.method} {request.path}")
         except Exception as e:
-            logger.error("Failed to increment request counter", exc_info=True)
+            logger.error(f"Failed to increment request counter: {e}")
     
     def record_request_duration(
         self, 
@@ -333,7 +364,6 @@ class MetricsCollector:
             return
         
         try:
-            # Get labels
             method = request.method
             endpoint = self._get_endpoint_label(request)
             status = str(response.status_code)
@@ -341,7 +371,6 @@ class MetricsCollector:
             
             logger.debug(f"Recording duration: method={method}, endpoint={endpoint}, status={status}, view_name={view_name}, duration={duration}")
             
-            # Record duration
             self.http_request_duration_seconds.labels(
                 method=method,
                 endpoint=endpoint,
@@ -349,7 +378,6 @@ class MetricsCollector:
                 view_name=view_name
             ).observe(duration)
             
-            # Record request size
             request_size = self._get_request_size(request)
             if request_size > 0:
                 self.http_request_size_bytes.labels(
@@ -357,7 +385,6 @@ class MetricsCollector:
                     endpoint=endpoint
                 ).observe(request_size)
             
-            # Record response size
             response_size = self._get_response_size(response)
             if response_size > 0:
                 self.http_response_size_bytes.labels(
@@ -367,7 +394,7 @@ class MetricsCollector:
                 ).observe(response_size)
         
         except Exception as e:
-            logger.error("Failed to record request duration", exc_info=True)
+            logger.error(f"Failed to record request duration: {e}")
     
     def increment_response_counter(self, request: HttpRequest, response: HttpResponse) -> None:
         """
@@ -381,7 +408,6 @@ class MetricsCollector:
             return
         
         try:
-            # Get labels
             method = request.method
             endpoint = self._get_endpoint_label(request)
             status = str(response.status_code)
@@ -389,7 +415,6 @@ class MetricsCollector:
             
             logger.debug(f"Incrementing response counter: method={method}, endpoint={endpoint}, status={status}, view_name={view_name}")
             
-            # Increment response counter
             self.http_requests_total.labels(
                 method=method,
                 endpoint=endpoint,
@@ -397,12 +422,11 @@ class MetricsCollector:
                 view_name=view_name
             ).inc()
             
-            # Decrement active requests
             self.django_active_requests.dec()
             logger.debug(f"Decremented active requests for {request.method} {request.path}")
         
         except Exception as e:
-            logger.error("Failed to increment response counter", exc_info=True)
+            logger.error(f"Failed to increment response counter: {e}")
     
     def increment_exception_counter(self, request: Optional[HttpRequest], exception: Exception) -> None:
         """
@@ -416,26 +440,23 @@ class MetricsCollector:
             return
         
         try:
-            # Get labels
             method = request.method if request else 'UNKNOWN'
             endpoint = self._get_endpoint_label(request) if request else 'unknown'
             exception_type = exception.__class__.__name__
             
             logger.debug(f"Incrementing exception counter: method={method}, endpoint={endpoint}, exception_type={exception_type}")
             
-            # Increment exception counter
             self.http_exceptions_total.labels(
                 method=method,
                 endpoint=endpoint,
                 exception_type=exception_type
             ).inc()
             
-            # Decrement active requests if request exists
             if request:
                 self.django_active_requests.dec()
         
         except Exception as e:
-            logger.error("Failed to increment exception counter", exc_info=True)
+            logger.error(f"Failed to increment exception counter: {e}")
     
     def record_db_query(self, db_alias: str, query_type: str, duration: float) -> None:
         """
@@ -451,20 +472,18 @@ class MetricsCollector:
         
         try:
             logger.debug(f"Recording DB query: db_alias={db_alias}, query_type={query_type}, duration={duration}")
-            # Increment query counter
             self.django_db_queries_total.labels(
                 db_alias=db_alias,
                 query_type=query_type
             ).inc()
             
-            # Record query duration
             self.django_db_query_duration_seconds.labels(
                 db_alias=db_alias,
                 query_type=query_type
             ).observe(duration)
         
         except Exception as e:
-            logger.error("Failed to record DB query metrics", exc_info=True)
+            logger.error(f"Failed to record DB query metrics: {e}")
     
     def record_cache_operation(self, cache_name: str, operation: str, result: str) -> None:
         """
@@ -487,7 +506,7 @@ class MetricsCollector:
             ).inc()
         
         except Exception as e:
-            logger.error("Failed to record cache operation metrics", exc_info=True)
+            logger.error(f"Failed to record cache operation metrics: {e}")
     
     def _get_endpoint_label(self, request: Optional[HttpRequest]) -> str:
         """
@@ -520,7 +539,6 @@ class MetricsCollector:
             if content_length:
                 return int(content_length)
             
-            # Fallback to body size if available
             if hasattr(request, 'body'):
                 return len(request.body)
             
@@ -550,7 +568,7 @@ class MetricsCollector:
         try:
             return generate_latest(self.registry).decode('utf-8')
         except Exception as e:
-            logger.error("Failed to generate metrics", exc_info=True)
+            logger.error(f"Failed to generate metrics: {e}")
             return ""
     
     def get_metrics_content_type(self) -> str:
@@ -572,21 +590,22 @@ class MetricsCollector:
             labelnames: Optional label names
             
         Returns:
-            The created counter, or None if metrics are not available
+            The created counter, or None if metrics are not available or creation fails
         """
         if not self.is_available():
             return None
         
         try:
             prefix = self.config.get_metrics_prefix()
+            metric_name = f"{prefix}_{name}_total"
             return Counter(
-                name=f'{prefix}_{name}',
+                name=metric_name,
                 documentation=documentation,
                 labelnames=labelnames or [],
                 registry=self.registry
             )
         except Exception as e:
-            logger.error(f"Failed to create custom counter {name}", exc_info=True)
+            logger.error(f"Failed to create custom counter {metric_name}: {e}", exc_info=True)
             return None
     
     def create_custom_histogram(
@@ -606,22 +625,23 @@ class MetricsCollector:
             buckets: Optional histogram buckets
             
         Returns:
-            The created histogram, or None if metrics are not available
+            The created histogram, or None if metrics are not available or creation fails
         """
         if not self.is_available():
             return None
         
         try:
             prefix = self.config.get_metrics_prefix()
+            metric_name = f"{prefix}_{name}"
             return Histogram(
-                name=f'{prefix}_{name}',
+                name=metric_name,
                 documentation=documentation,
                 labelnames=labelnames or [],
                 buckets=buckets or self.config.get('METRICS_HISTOGRAM_BUCKETS'),
                 registry=self.registry
             )
         except Exception as e:
-            logger.error(f"Failed to create custom histogram {name}", exc_info=True)
+            logger.error(f"Failed to create custom histogram {metric_name}: {e}", exc_info=True)
             return None
     
     def create_custom_gauge(
@@ -639,21 +659,22 @@ class MetricsCollector:
             labelnames: Optional label names
             
         Returns:
-            The created gauge, or None if metrics are not available
+            The created gauge, or None if metrics are not available or creation fails
         """
         if not self.is_available():
             return None
 
         try:
             prefix = self.config.get_metrics_prefix()
+            metric_name = f"{prefix}_{name}"
             return Gauge(
-                name=f'{prefix}_{name}',
+                name=metric_name,
                 documentation=documentation,
                 labelnames=labelnames or [],
                 registry=self.registry
             )
         except Exception as e:
-            logger.error(f"Failed to create custom gauge {name}", exc_info=True)
+            logger.error(f"Failed to create custom gauge {metric_name}: {e}", exc_info=True)
             return None
 
 def metrics_view(request: HttpRequest) -> HttpResponse:
@@ -668,7 +689,7 @@ def metrics_view(request: HttpRequest) -> HttpResponse:
     """
     from .config import get_config
     config = get_config()
-    collector = get_metrics_collector(config)  # Use singleton
+    collector = get_metrics_collector(config)
     metrics_data = collector.get_metrics()
     return HttpResponse(
         content=metrics_data,
