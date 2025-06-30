@@ -11,10 +11,12 @@ from .config import ObservabilityConfig
 
 logger = logging.getLogger(__name__)
 
+
 class DjangoIntegration:
     """
     Handles Django-specific observability integrations for database, cache, and templates.
     """
+
     def __init__(self, config: ObservabilityConfig):
         """
         Initialize the Django integration.
@@ -23,24 +25,27 @@ class DjangoIntegration:
             config: The observability configuration instance
         """
         self.config = config
-        if os.getenv('PYTEST_CURRENT_TEST') and not config.get('ENABLE_TEST_INTEGRATION', False):
+        if os.getenv("PYTEST_CURRENT_TEST") and not config.get(
+            "ENABLE_TEST_INTEGRATION", False
+        ):
             return
         self.tracer = trace.get_tracer(__name__)
         self._setup_integrations()
 
     def _setup_integrations(self) -> None:
         """Setup Django-specific integrations."""
-        if self.config.get('INTEGRATE_DB_TRACING', True):
+        if self.config.get("INTEGRATE_DB_TRACING", True):
             self._instrument_database()
-        if self.config.get('INTEGRATE_CACHE_TRACING', True):
+        if self.config.get("INTEGRATE_CACHE_TRACING", True):
             self._instrument_cache()
-        if self.config.get('INTEGRATE_TEMPLATE_TRACING', True):
+        if self.config.get("INTEGRATE_TEMPLATE_TRACING", True):
             self._instrument_templates()
 
     def _instrument_database(self) -> None:
         """Instrument database queries for tracing."""
         try:
             from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+
             try:
                 Psycopg2Instrumentor().instrument()
                 logger.info("Database instrumentation enabled")
@@ -51,12 +56,13 @@ class DjangoIntegration:
 
         try:
             from opentelemetry.instrumentation.dbapi import DatabaseApiIntegration
+
             DatabaseApiIntegration(
                 connection,
                 "django.db",
                 "sql",
                 enable_commenter=True,
-                commenter_options={"db_driver": "django"}
+                commenter_options={"db_driver": "django"},
             ).instrument()
             logger.info("Database instrumentation enabled")
         except Exception as e:
@@ -66,6 +72,7 @@ class DjangoIntegration:
         """Instrument cache operations for tracing."""
         try:
             from opentelemetry.instrumentation.redis import RedisInstrumentor
+
             RedisInstrumentor().instrument()
             logger.info("Redis cache instrumentation enabled")
         except ImportError:
@@ -75,7 +82,7 @@ class DjangoIntegration:
         """Instrument template rendering for tracing."""
         try:
             for engine in engines.all():
-                if hasattr(engine, 'engine'):
+                if hasattr(engine, "engine"):
                     engine.engine = self._wrap_template_engine(engine.engine)
             logger.info("Template instrumentation enabled")
         except Exception as e:
@@ -83,7 +90,7 @@ class DjangoIntegration:
 
     def _wrap_template_engine(self, engine: Any) -> Any:
         """Wrap template engine to trace rendering."""
-        original_render = getattr(engine, 'render', None)
+        original_render = getattr(engine, "render", None)
         if not original_render:
             return engine
 
@@ -93,11 +100,11 @@ class DjangoIntegration:
                 attributes={
                     SpanAttributes.CODE_FUNCTION: "render",
                     SpanAttributes.CODE_NAMESPACE: engine.__class__.__name__,
-                }
+                },
             ) as span:
                 result = original_render(*args, **kwargs)
-                if 'template_name' in kwargs:
-                    span.set_attribute("template.name", kwargs['template_name'])
+                if "template_name" in kwargs:
+                    span.set_attribute("template.name", kwargs["template_name"])
                 return result
 
         engine.render = wrapped_render
