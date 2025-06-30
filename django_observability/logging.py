@@ -8,13 +8,12 @@ correlation ID tracking, and integration with Django's logging system.
 import json
 import logging
 import time
-from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
 from django.http import HttpRequest, HttpResponse
 
 from .config import ObservabilityConfig
-from .utils import get_client_ip, sanitize_headers, get_view_name
+from .utils import get_client_ip, get_view_name, sanitize_headers
 
 
 class JSONFormatter(logging.Formatter):

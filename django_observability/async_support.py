@@ -1,6 +1,7 @@
-from typing import Callable
-from django.http import HttpRequest, HttpResponse
 import asyncio
+from typing import Callable
+
+from django.http import HttpRequest, HttpResponse
 
 
 async def async_wrapper(get_response: Callable, request: HttpRequest) -> HttpResponse:

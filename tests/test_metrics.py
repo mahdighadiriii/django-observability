@@ -1,12 +1,11 @@
+from unittest.mock import Mock, patch
+
 import pytest
-from django.test import RequestFactory
-from django.http import HttpResponse
+from django.core.cache import cache
 from django.db import connection
-from django.core.cache import cache, caches
-from unittest.mock import patch, Mock
-from prometheus_client import CollectorRegistry
-from django_observability.metrics import MetricsCollector, get_metrics_collector
-from django_observability.config import ObservabilityConfig
+from django.http import HttpResponse
+
+from django_observability.metrics import MetricsCollector
 
 
 @pytest.mark.django_db

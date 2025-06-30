@@ -1,32 +1,33 @@
-import time
 import logging
-from typing import Dict, List, Optional, Any
 import re
-from django.conf import settings
+import time
+from typing import List, Optional
+
 from django import get_version as django_get_version
+from django.conf import settings
 from prometheus_client import Counter, Gauge, Histogram, Info
 
 try:
     from prometheus_client import (
-        Counter,
-        Histogram,
-        Gauge,
-        Info,
-        CollectorRegistry,
-        generate_latest,
         CONTENT_TYPE_LATEST,
+        CollectorRegistry,
+        Counter,
+        Gauge,
+        Histogram,
+        Info,
+        generate_latest,
     )
 
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-from django.http import HttpRequest, HttpResponse
-from django.db import connection
 from django.core.cache import cache
+from django.db import connection
+from django.http import HttpRequest, HttpResponse
 
 from .config import ObservabilityConfig
-from .utils import get_client_ip, get_view_name
+from .utils import get_view_name
 
 logger = logging.getLogger("django_observability.metrics")
 

@@ -1,6 +1,6 @@
 # tests/urls.py
-from django.urls import path
 from django.http import HttpResponse
+from django.urls import path
 
 
 def test_view(request):

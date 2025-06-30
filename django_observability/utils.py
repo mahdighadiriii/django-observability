@@ -1,8 +1,8 @@
-import re
-from typing import Dict, List, Optional
+import logging
+from typing import Dict, List
+
 from django.http import HttpRequest
 from django.urls import resolve
-import logging
 
 logger = logging.getLogger("django_observability.utils")
 

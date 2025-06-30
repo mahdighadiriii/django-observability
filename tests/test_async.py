@@ -1,8 +1,8 @@
 import pytest
-from django.test import RequestFactory
 from django.http import HttpResponse
-from django_observability.middleware import AsyncObservabilityMiddleware
+
 from django_observability.async_support import async_wrapper
+from django_observability.middleware import AsyncObservabilityMiddleware
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,8 @@ environment variables, and validation with sensible defaults.
 """
 
 import os
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 

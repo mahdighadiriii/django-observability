@@ -1,10 +1,7 @@
 import pytest
-import logging
-from django_observability.logging import JSONFormatter, StructuredLogger
-from django.test import RequestFactory
 from django.http import HttpResponse
-from django.utils import timezone
-from datetime import datetime
+
+from django_observability.logging import JSONFormatter, StructuredLogger
 
 
 @pytest.mark.django_db

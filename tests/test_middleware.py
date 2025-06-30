@@ -1,11 +1,10 @@
 import pytest
-from django.test import RequestFactory
 from django.http import HttpResponse
+
 from django_observability.middleware import (
-    ObservabilityMiddleware,
     AsyncObservabilityMiddleware,
+    ObservabilityMiddleware,
 )
-from django_observability.config import ObservabilityConfig
 
 
 @pytest.mark.django_db

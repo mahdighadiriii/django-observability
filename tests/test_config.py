@@ -1,4 +1,5 @@
 import pytest
+
 from django_observability.config import ObservabilityConfig
 
 

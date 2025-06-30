@@ -2,15 +2,15 @@
 Pytest configuration and fixtures for django-observability tests.
 """
 
-import os
 import pytest
+from django.conf import settings
 from django.test import RequestFactory
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
 from django_observability.config import ObservabilityConfig
-from django.conf import settings
 
 # Configure minimal Django settings for tests
 if not settings.configured:

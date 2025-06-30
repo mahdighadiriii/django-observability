@@ -5,21 +5,21 @@ This middleware provides comprehensive observability for Django applications
 including distributed tracing, metrics collection, and structured logging.
 """
 
+import logging
 import time
 import uuid
-from typing import Callable, Optional, Any
+from typing import Callable, Optional
+
+from django.core.exceptions import MiddlewareNotUsed
 from django.http import HttpRequest, HttpResponse
 from django.utils.deprecation import MiddlewareMixin
-from django.core.exceptions import MiddlewareNotUsed
-import logging
 
 from .config import get_config
-from .tracing import TracingManager
-from .metrics import get_metrics_collector
-from .logging import StructuredLogger
-from .utils import get_client_ip, is_excluded_path
 from .exceptions import ObservabilityError
-
+from .logging import StructuredLogger
+from .metrics import get_metrics_collector
+from .tracing import TracingManager
+from .utils import is_excluded_path
 
 logger = logging.getLogger("django_observability")
 

@@ -1,15 +1,14 @@
 import os
-import pytest
-from unittest.mock import patch, Mock
 from contextlib import contextmanager
-from django.test import RequestFactory
-from django.http import HttpResponse
-from django.template import Engine
-from django_observability.middleware import ObservabilityMiddleware
-from django_observability.config import get_config
-from django_observability import django_integration
+from unittest.mock import Mock, patch
+
+import pytest
 from django.db import connection
-from opentelemetry import trace
+from django.http import HttpResponse
+
+from django_observability import django_integration
+from django_observability.config import get_config
+from django_observability.middleware import ObservabilityMiddleware
 
 
 @pytest.mark.django_db

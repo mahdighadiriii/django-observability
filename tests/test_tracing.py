@@ -1,5 +1,6 @@
 import pytest
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+
 from django_observability.tracing import TracingManager
 
 

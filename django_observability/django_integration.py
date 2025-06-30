@@ -1,8 +1,8 @@
-import os
 import logging
-from typing import Any, Dict
+import os
+from typing import Any
+
 from django.db import connection
-from django.core.cache import cache
 from django.template import engines
 from opentelemetry import trace
 from opentelemetry.semconv.trace import SpanAttributes

@@ -7,17 +7,18 @@ including automatic instrumentation of Django requests.
 
 import logging
 from typing import Optional
-from django.http import HttpRequest, HttpResponse
+
 from django.conf import settings
+from django.http import HttpRequest, HttpResponse
 
 logger = logging.getLogger("django_observability.tracing")
 
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
     from opentelemetry.instrumentation.django import DjangoInstrumentor
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
     from opentelemetry.semconv.trace import SpanAttributes
 
     OPENTELEMETRY_AVAILABLE = True
